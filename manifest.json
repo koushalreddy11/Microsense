@@ -1,8 +1,0 @@
-{
-  "name": "MicroSense",
-  "short_name": "MicroSense",
-  "start_url": "/index.html",
-  "display": "standalone",
-  "theme_color": "#0077b6",
-  "background_color": "#ffffff"
-}
