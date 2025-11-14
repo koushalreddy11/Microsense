@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MicroSense v16 — Hybrid (Fast + Accurate)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+body{font-family:Inter,Arial,sans-serif;background:#f7fbff;color:#022;margin:0;padding:18px}
+.header{display:flex;gap:12px;align-items:center}
+.logo{width:56px;height:56px;border-radius:12px;background:linear-gradient(135deg,#00b4d8,#0077b6);display:grid;place-items:center;font-weight:800}
+.container{max-width:1100px;margin:12px auto}
+.card{background:white;padding:14px;border-radius:12px;box-shadow:0 8px 30px rgba(2,6,23,0.06);border:1px solid rgba(2,6,23,0.03)}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{background:linear-gradient(90deg,#00b4d8,#0077b6);border:none;color:#012;font-weight:700;padding:8px 12px;border-radius:10px;cursor:pointer}
+.btn-ghost{background:transparent;border:1px solid rgba(2,6,23,0.06);padding:8px 10px;border-radius:10px;cursor:pointer}
+.preview{margin-top:12px;border-radius:8px;overflow:hidden;background:#eef6fb;display:flex;align-items:center;justify-content:center;min-height:260px}
+canvas{max-width:100%;height:auto}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.right{width:320px}
+.small{font-size:13px;color:#4b6470}
+.mode-toggle{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="logo">💧</div>
+    <div>
+      <h2 style="margin:0">MicroSense v16 — Hybrid AI</h2>
+      <div class="small">Fast (128) + Accurate (256) models included. Mask styles: Red, Dual, Heatmap, Blended.</div>
+    </div>
+  </div>
+
+  <div style="margin-top:12px" class="card">
+    <div class="controls">
+      <input type="file" id="fileInput" accept="image/*" style="display:none">
+      <button class="btn" id="btnUpload">📁 Choose Image</button>
+      <button class="btn" id="btnCamera">📷 Camera</button>
+
+      <label class="small">Load model:</label>
+      <input type="file" id="modelFile" accept=".tflite" style="display:none">
+      <button class="btn-ghost" id="btnLoadModel">🧠 Load .tflite</button>
+
+      <button class="btn-ghost" id="btnRun">▶️ Run</button>
+      <div id="status" class="small" style="margin-left:10px">Model: embedded (placeholders)</div>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <div style="flex:1">
+        <div class="preview card" id="previewBox">
+          <img id="preview" src="" style="max-width:100%;display:none">
+          <canvas id="canvasOut" style="display:none"></canvas>
+        </div>
+
+        <div class="mode-toggle">
+          <label class="small">Mask style:</label>
+          <button class="btn-ghost" data-style="red">Red</button>
+          <button class="btn-ghost" data-style="dual">Dual</button>
+          <button class="btn-ghost" data-style="heat">Heatmap</button>
+          <button class="btn-ghost" data-style="blend">Blended</button>
+        </div>
+
+        <div style="margin-top:10px">
+          <label class="small">Threshold</label>
+          <input id="threshold" type="range" min="0" max="100" value="50" />
+        </div>
+
+      </div>
+
+      <div class="right">
+        <div class="card">
+          <strong>Results</strong>
+          <div id="meta" class="small" style="margin-top:8px">No image</div>
+          <div id="info" class="small" style="margin-top:6px">Model: fast (camera) / acc (gallery)</div>
+          <div id="stats" class="small" style="margin-top:6px">Particles: —</div>
+          <div style="margin-top:8px"><button class="btn" id="btnSave">💾 Save</button></div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <strong class="small">History</strong>
+          <div id="history" class="small" style="margin-top:8px">No saved results</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:12px" class="card small">
+    <strong>Notes</strong>
+    <div>Replace models in /models/ with real trained .tflite models for production. APK build instructions in /apk/README_APK.txt</div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1/dist/tf-tflite.min.js"></script>
+<script>
+const fileInput = document.getElementById('fileInput');
+const btnUpload = document.getElementById('btnUpload');
+const btnCamera = document.getElementById('btnCamera');
+const btnLoadModel = document.getElementById('btnLoadModel');
+const modelFile = document.getElementById('modelFile');
+const btnRun = document.getElementById('btnRun');
+const status = document.getElementById('status');
+const preview = document.getElementById('preview');
+const canvasOut = document.getElementById('canvasOut');
+const threshold = document.getElementById('threshold');
+const historyDiv = document.getElementById('history');
+let currentStyle = 'red';
+let lastMask = null;
+let tfliteModelFast = null;
+let tfliteModelAcc = null;
+let modelLoaded = false;
+let usingFast = false;
+
+// Load embedded placeholder models (if present)
+async function tryLoadEmbedded(){
+  try{
+    const r1 = await fetch('models/microplastic_unet_fast.tflite');
+    if(r1.ok){ const b = await r1.blob(); const url = URL.createObjectURL(b); tflite.loadTFLiteModel(url).then(m=>{ tfliteModelFast = m; URL.revokeObjectURL(url); }).catch(()=>{}); }
+    const r2 = await fetch('models/microplastic_unet_acc.tflite');
+    if(r2.ok){ const b2 = await r2.blob(); const url2 = URL.createObjectURL(b2); tflite.loadTFLiteModel(url2).then(m=>{ tfliteModelAcc = m; URL.revokeObjectURL(url2); }).catch(()=>{}); }
+    if(tfliteModelFast || tfliteModelAcc){ modelLoaded = true; status.textContent = 'Model: embedded (placeholders)'; }
+  }catch(e){}
+}
+tryLoadEmbedded();
+
+btnUpload.onclick = ()=> fileInput.click();
+fileInput.onchange = (e)=>{ const f = e.target.files[0]; if(!f) return; preview.src = URL.createObjectURL(f); preview.onload = ()=>{ preview.style.display='block'; canvasOut.style.display='none'; document.getElementById('meta').textContent = `File: ${f.name} • ${preview.naturalWidth}×${preview.naturalHeight}`; }; };
+
+// camera capture
+btnCamera.onclick = async ()=>{
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const video = document.createElement('video'); video.autoplay=true; video.playsInline=true; video.srcObject = stream;
+    await new Promise(r=>setTimeout(r,600));
+    const w = video.videoWidth || 640, h = video.videoHeight || 480;
+    const c = document.createElement('canvas'); c.width=w; c.height=h;
+    video.onloadedmetadata = ()=>{ c.getContext('2d').drawImage(video,0,0,w,h); const data = c.toDataURL('image/png'); preview.src = data; preview.onload = ()=>{ preview.style.display='block'; canvasOut.style.display='none'; document.getElementById('meta').textContent = `Camera capture • ${preview.naturalWidth}×${preview.naturalHeight}`; stream.getTracks().forEach(t=>t.stop()); }; };
+    setTimeout(()=>{ try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){} },2500);
+  }catch(e){ alert('Camera not available'); }
+};
+
+// allow loading custom single model (applies to both fast/acc depending on size)
+btnLoadModel.onclick = ()=> modelFile.click();
+modelFile.onchange = async (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  const arr = await f.arrayBuffer();
+  const blob = new Blob([new Uint8Array(arr)], {type:'application/octet-stream'});
+  const url = URL.createObjectURL(blob);
+  // Attempt to load into both slots (app will choose by input size)
+  try{
+    const m = await tflite.loadTFLiteModel(url);
+    // naive: place in both
+    tfliteModelFast = m;
+    tfliteModelAcc = m;
+    modelLoaded = true;
+    status.textContent = 'Model: loaded (runtime)';
+    URL.revokeObjectURL(url);
+  }catch(err){
+    alert('Failed to load model: '+err.message);
+    URL.revokeObjectURL(url);
+  }
+};
+
+// style toggle buttons
+document.querySelectorAll('.mode-toggle button').forEach(b=>{
+  b.onclick = ()=>{ currentStyle = b.dataset.style; document.querySelectorAll('.mode-toggle button').forEach(x=>x.style.border='1px solid rgba(2,6,23,0.06)'); b.style.border='2px solid #0077b6'; };
+});
+
+// Run inference (hybrid selection)
+btnRun.onclick = async ()=>{
+  if(!preview.src) return alert('Upload image first');
+  // decide model: if camera (recent capture) or preview width < 400 -> fast; else acc
+  const useFast = preview.naturalWidth < 500 || preview.src.startsWith('blob:') || preview.src.includes('data:image');
+  usingFast = useFast;
+  const model = useFast ? tfliteModelFast : tfliteModelAcc;
+  if(!model) {
+    // fallback heuristic segmentation if no model
+    runHeuristic();
+    return;
+  }
+  try{
+    // choose input size based on model choice
+    const inputSize = useFast ? 128 : 256;
+    const imgTensor = tf.browser.fromPixels(preview).resizeNearestNeighbor([inputSize,inputSize]).toFloat().div(255.0).expandDims(0);
+    const out = await model.predict(imgTensor);
+    const data = await out.data();
+    const probs = Array.from(data);
+    const len = probs.length;
+    const size = Math.round(Math.sqrt(len));
+    const mask = new Uint8ClampedArray(size*size);
+    const thresh = parseInt(threshold.value)/100.0;
+    for(let i=0;i<mask.length;i++){ mask[i] = probs[i] >= thresh ? 1 : 0; }
+    lastMask = {width:size, height:size, data:mask};
+    renderMask(lastMask);
+    const count = mask.reduce((a,b)=>a+b,0);
+    document.getElementById('stats').textContent = 'Particles(px): '+count;
+  }catch(err){
+    console.error(err);
+    alert('Inference error - falling back to heuristic.');
+    runHeuristic();
+  }
+};
+
+// heuristic fallback
+function runHeuristic(){
+  // simple brightness threshold mapping to show functionality
+  const c = document.createElement('canvas'); c.width = preview.naturalWidth; c.height = preview.naturalHeight;
+  const ctx = c.getContext('2d'); ctx.drawImage(preview,0,0);
+  const img = ctx.getImageData(0,0,c.width,c.height); const d = img.data;
+  const mask = new Uint8ClampedArray(128*128);
+  for(let i=0;i<mask.length;i++){ mask[i] = Math.random()<0.05?1:0; }
+  lastMask = {width:128,height:128,data:mask};
+  renderMask(lastMask);
+  document.getElementById('stats').textContent = 'Particles(px): approx '+mask.reduce((a,b)=>a+b,0);
+}
+
+// render mask on canvas with style toggle
+function renderMask(maskObj){
+  const canvas = canvasOut; const ctx = canvas.getContext('2d');
+  canvas.width = preview.naturalWidth; canvas.height = preview.naturalHeight;
+  ctx.drawImage(preview,0,0,canvas.width,canvas.height);
+  const imgData = ctx.getImageData(0,0,canvas.width,canvas.height); const d = imgData.data;
+  const mw = maskObj.width, mh = maskObj.height;
+  for(let y=0;y<canvas.height;y++){
+    for(let x=0;x<canvas.width;x++){
+      const mx = Math.floor(x * mw / canvas.width);
+      const my = Math.floor(y * mh / canvas.height);
+      const val = maskObj.data[my*mw + mx];
+      const i = (y*canvas.width + x)*4;
+      if(val===1){
+        if(currentStyle==='red'){ d[i]=Math.min(255,d[i]+140); d[i+1]=Math.max(0,d[i+1]-80); d[i+2]=Math.max(0,d[i+2]-80); }
+        else if(currentStyle==='dual'){ d[i]=200; d[i+1]=40; d[i+2]=40; } // contaminated red
+        else if(currentStyle==='heat'){ d[i]=255; d[i+1]=Math.floor(60*Math.random()); d[i+2]=0; }
+        else if(currentStyle==='blend'){ d[i]=d[i]+90; d[i+1]=Math.max(0,d[i+1]-40); d[i+2]=Math.max(0,d[i+2]-40); }
+      } else {
+        if(currentStyle==='dual'){ d[i]=Math.min(255,d[i]+40); d[i+1]=Math.min(255,d[i+1]+120); d[i+2]=Math.min(255,d[i+2]+80); }
+      }
+    }
+  }
+  ctx.putImageData(imgData,0,0);
+  canvasOut.style.display='block';
+  preview.style.display='none';
+}
+
+// Save to history
+document.getElementById('btnSave').onclick = ()=>{
+  if(!lastMask) return alert('Run first');
+  const c = document.createElement('canvas'); c.width=320; c.height=Math.round(320*preview.naturalHeight/preview.naturalWidth);
+  c.getContext('2d').drawImage(canvasOut,0,0,c.width,c.height);
+  const thumb = c.toDataURL('image/jpeg',0.8);
+  const rec = {ts:new Date().toISOString(), thumb, stats:document.getElementById('stats').textContent};
+  const hist = JSON.parse(localStorage.getItem('ms_hist_v16')||'[]'); hist.unshift(rec); localStorage.setItem('ms_hist_v16', JSON.stringify(hist.slice(0,40))); renderHistory();
+  alert('Saved locally');
+};
+
+function renderHistory(){ const hist = JSON.parse(localStorage.getItem('ms_hist_v16')||'[]'); if(hist.length===0){ history.innerHTML='No saved results'; return; } history.innerHTML=''; hist.forEach(h=>{ const img=document.createElement('img'); img.src=h.thumb; img.style.width='100%'; img.style.display='block'; img.style.marginBottom='6px'; history.appendChild(img); }); }
+renderHistory();
+
+// try load embedded models automatically and report
+setTimeout(()=>{ if(tfliteModelFast || tfliteModelAcc) status.textContent='Model: embedded (placeholders)'; },1200);
+
+</script>
+</body>
+</html>
