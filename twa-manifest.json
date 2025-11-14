@@ -1,0 +1,7 @@
+{
+  "name": "MicroSense TWA",
+  "packageId": "com.koushal.microsense",
+  "host": "https://koushal.microsense.local",
+  "startUrl": "https://koushal.microsense.local/index.html",
+  "iconUrl": "icons/icon-512.png"
+}
