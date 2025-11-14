@@ -1,9 +1,0 @@
-{
-  "name": "MicroSense TWA",
-  "start_url": "https://koushal.microsense.local/index.html",
-  "short_name": "MicroSense",
-  "display": "standalone",
-  "theme_color": "#0077b6",
-  "background_color": "#ffffff",
-  "icon": "icons/icon-512.png"
-}
